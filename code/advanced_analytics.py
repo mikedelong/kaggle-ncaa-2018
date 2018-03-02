@@ -9,10 +9,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score
-from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.model_selection import GridSearchCV, train_test_split, StratifiedKFold, cross_val_score
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.tree import DecisionTreeClassifier
 from sklearn.utils import shuffle
+
+# from xgboost.sklearn import XGBClassifier
 
 pd.set_option('display.max_columns', 999)
 
@@ -23,6 +30,7 @@ start_time = time.time()
 def get_year_t1_t2(arg_id):
     result = (int(item) for item in arg_id.split('_'))
     return result
+
 
 formatter = logging.Formatter('%(asctime)s : %(name)s :: %(levelname)s : %(message)s')
 logger = logging.getLogger('main')
@@ -385,8 +393,6 @@ logger.debug('sample sub head : %s' % df_sample_sub.head(default_head))
 
 # This generates a submission file for 2014-2017 using the simple Seeds model
 n_test_games = len(df_sample_sub)
-logger.debug('%d %d %d %d' %
-             (df_sample_sub.size, df_sample_sub.shape[0], df_sample_sub.shape[1], len(df_sample_sub)))
 logger.debug('n test games : %d' % n_test_games)
 X_test = np.zeros(shape=(n_test_games, 1))
 logger.debug('X test shape is %d x %d' % X_test.shape)
@@ -398,12 +404,12 @@ for ii, row in df_sample_sub.iterrows():
     diff_seed = team1 - team2
     X_test[ii, 0] = diff_seed
 
-preds = clf.predict_proba(X_test)[:, 1]
+seeds_preds = clf.predict_proba(X_test)[:, 1]
 
 logger.debug('df sample sub shape: %d x %d' % df_sample_sub.shape)
 logger.debug('X_test shape: %d x %d' % X_test.shape)
-logger.debug('preds length: %d' % len(preds))
-df_sample_sub['Pred'] = preds
+logger.debug('preds length: %d' % len(seeds_preds))
+df_sample_sub['Pred'] = seeds_preds
 logger.debug('sample sub shape: %d x %d' % df_sample_sub.shape)
 logreg_file = '../output/logreg_seed_starter.csv'
 logger.debug('writing sample sub to %s' % logreg_file)
@@ -411,6 +417,211 @@ df_sample_sub.to_csv(logreg_file, index=False)
 logger.debug('sample sub head: %s' % df_sample_sub.head(default_head))
 
 logger.debug('tourney final head: %s' % df_tourney_final.head(default_head))
+
+df_tourney_list = pd.read_csv('../input/NCAATourneyCompactResults.csv')
+df_tourney_list.drop(labels=['DayNum', 'WScore', 'LScore', 'WLoc', 'NumOT'], inplace=True, axis=1)
+df_tourney_list = df_tourney_list[df_tourney_list['Season'] > 2002]
+df_tourney_list.reset_index(inplace=True, drop=True)
+logger.debug('tourney list (head): %s' % df_tourney_list.head(default_head))
+
+# gets the features for the winning team
+
+df_model_winners = pd.merge(left=df_tourney_list, right=df_tourney_final, how='left', left_on=['Season', 'WTeamID'],
+                            right_on=['Season', 'TeamID'])
+df_model_winners.drop(labels=['TeamID'], inplace=True, axis=1)
+logger.debug('model winners (head): %s' % df_model_winners.head(default_head))
+
+# gets the features for the losing team
+
+df_model_losers = pd.merge(left=df_tourney_list, right=df_tourney_final, how='left', left_on=['Season', 'LTeamID'],
+                           right_on=['Season', 'TeamID'])
+df_model_losers.drop(labels=['TeamID'], inplace=True, axis=1)
+logger.debug('model losers (head): %s' % df_model_losers.head(default_head))
+
+# This generates the differences between the features between winning and losing team and assigns 1 as the classifier for winning
+
+df_model_winner_diff = (df_model_winners.iloc[:, 3:] - df_model_losers.iloc[:, 3:])
+df_model_winner_diff['result'] = 1
+df_model_winner_diff = pd.merge(left=df_model_winner_diff, right=df_tourney_list, left_index=True, right_index=True,
+                                how='inner')
+
+logger.debug('model winners (head): %s' % df_model_winner_diff.head(default_head))
+# This generates the  between the features between losing and winning team and assigns 0 as the classifier for losing
+
+df_model_loser_diff = (df_model_losers.iloc[:, 3:] - df_model_winners.iloc[:, 3:])
+df_model_loser_diff['result'] = 0
+df_model_loser_diff = pd.merge(left=df_model_loser_diff, right=df_tourney_list, left_index=True, right_index=True,
+                               how='inner')
+logger.debug('model losers (head): %s' % df_model_loser_diff.head(default_head))
+
+df_predictions_tourney = pd.concat((df_model_winner_diff, df_model_loser_diff), axis=0)
+df_predictions_tourney.sort_values('Season', inplace=True)
+df_predictions_tourney.reset_index(inplace=True, drop=True)
+logger.debug('tourney predictions (head): %s' % df_predictions_tourney.head(default_head))
+
+# Time to split the dataframe into its various components for ML
+labels = df_predictions_tourney['result']
+IDs = df_predictions_tourney.iloc[:, 15:]
+features = df_predictions_tourney.iloc[:, 0:14]
+logger.debug('features (head): %s' % features.head(default_head))
+
+# This will be the true test set for submission for phase one (4 years 2014-2017)
+
+labels_submission = df_predictions_tourney['result'][df_predictions_tourney['Season'] > 2013]
+IDs_submission = df_predictions_tourney.iloc[1426:, 15:]
+features_submission = df_predictions_tourney.iloc[1426:, 0:14]
+
+# This will be the training set
+
+y = df_predictions_tourney['result'][df_predictions_tourney['Season'] < 2014]
+IDs_training = df_predictions_tourney.iloc[:1426, 15:]
+X = df_predictions_tourney.iloc[:1426, 0:14]
+X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=0.8, test_size=0.2, random_state=1, stratify=y)
+
+clf1 = LogisticRegression()
+
+clf2 = KNeighborsClassifier()
+
+# clf3 = XGBClassifier()
+
+clf4 = DecisionTreeClassifier()
+
+clf5 = RandomForestClassifier()
+
+clf6 = GradientBoostingClassifier()
+
+# Setting up the parameter grids
+
+param_grid1 = [{'clf1__C': list(np.logspace(start=-5, stop=3, num=9))}]
+
+param_grid2 = [
+    {'clf2__n_neighbors': list(range(1, 20)), 'clf2__p': [1, 2], 'clf2__algorithm': ['ball_tree', 'kd_tree']}]
+
+# param_grid3 = [{'learning_rate' : [0.1, 0.3],
+#                 'max_depth': [3, 6],
+#                 'min_child_weight': list(range(1, 3))}]
+
+param_grid4 = [{'max_depth': list(range(3, 6)), 'criterion': ['gini', 'entropy'], 'min_samples_leaf': [20, 50]}]
+
+param_grid5 = [{'max_depth': list(range(1, 5)), 'criterion': ['gini', 'entropy'], 'min_samples_split': [2, 3]}]
+
+param_grid6 = [{'learning_rate': [0.01, 0.1], 'loss': ['deviance', 'exponential'], 'max_depth': list(range(3, 4))}]
+
+# Building the pipelines
+pipe1 = Pipeline([('std', StandardScaler()), ('clf1', clf1)])
+pipe2 = Pipeline([('std', StandardScaler()), ('clf2', clf2)])
+# pipe3 = Pipeline([('std', StandardScaler()),('clf3', clf3)])
+# pipe4 = Pipeline([('std', StandardScaler()), ('clf4', clf4)])
+# pipe5 = Pipeline([('std', StandardScaler()), ('clf5', clf5)])
+# pipe6 = Pipeline([('std', StandardScaler()), ('clf6', clf6)])
+
+# Setting up multiple GridSearchCV objects, 1 for each algorithm
+
+gridcvs = {}
+
+inner_cv = StratifiedKFold(n_splits=10, shuffle=False, random_state=2)
+outer_cv = StratifiedKFold(n_splits=10, shuffle=False, random_state=2)
+
+for pgrid, est, name in zip((param_grid1, param_grid2,
+                             # param_grid3,
+                             param_grid4,
+                             param_grid5, param_grid6),
+                            (pipe1, pipe2,
+                             # clf3,
+                             clf4, clf5, clf6),
+                            ('Logistic', 'KNN',
+                             # 'XGBoost',
+                             'DTree', 'Random Forest', 'Gradient Boosting')):
+
+    # (pipe1, pipe2, clf3, clf4, clf5, clf6),
+    # First loop runs GridSearch and does Cross validation to find the best parameters
+
+    gcv = GridSearchCV(estimator=est,
+                       param_grid=pgrid,
+                       scoring='neg_log_loss',
+                       cv=outer_cv,
+                       verbose=0,
+                       refit=True,
+                       return_train_score=False)
+
+    gcv.fit(X_train, y_train)
+
+    gridcvs[name] = gcv
+
+    logger.debug('model %s has best estimator %s' % (name, gcv.best_estimator_))
+    logger.debug('Best score on Grid Search Cross Validation is %.2f%%' % (gcv.best_score_))
+    # print('Accuracy %.2f%% (average over CV test folds)' % (100 * best_algo.best_score_))
+    results = pd.DataFrame(gcv.cv_results_)
+
+    # Inner loop runs Cross Val Score on tuned parameter model to determine accuracy of fit
+
+    # for name, gs_est in sorted(gridcvs.items()):
+
+    nested_score = cross_val_score(gcv,
+                                   X=X_train,
+                                   y=y_train,
+                                   cv=inner_cv,
+                                   scoring='neg_log_loss')
+
+    logger.debug('Name, Log Loss, Std Dev, based on Best Parameter Model using Cross Validation Scoring')
+    logger.debug('%s | %.2f %.2f' % (name, nested_score.mean(), nested_score.std() * 100))
+
+    # Generate predictions and probabilities
+    best_algo = gcv
+    best_algo.fit(X_train, y_train)
+
+    train_acc = accuracy_score(y_true=y_train, y_pred=best_algo.predict(X_train))
+    test_acc = accuracy_score(y_true=y_test, y_pred=best_algo.predict(X_test))
+
+    logger.debug('Training Accuracy: %.2f%%' % (100 * train_acc))
+    logger.debug('Test Accuracy: %.2f%%' % (100 * test_acc))
+    # print('Slippage: %.2f%%' % ((100 * test_acc) - (100 * train_acc)))
+
+    # prints classification report and confusion matrix
+
+    if name != 'SVM':
+
+        predictions = best_algo.predict(X_test)
+        probability = best_algo.predict_proba(X_test)
+        logger.debug(classification_report(y_test, predictions))
+        logger.debug(confusion_matrix(y_test, predictions))
+
+    else:
+        logger.debug('for SVM we have no classification report or confusion matrix')
+
+# retrain best classifier on the full scaled training data set now
+
+clf = LogisticRegression(C=1)
+
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+clf.fit(X_scaled, y)
+
+logger.debug('X (head) : %s' % X.head(default_head))
+
+# steps for grabbing teams info and creating the input for the model
+
+n_test_games = len(df_sample_sub)
+X_test = np.zeros(shape=(n_test_games, 1))
+columns = df_tourney_final.columns.get_values()
+model = []
+data = []
+
+for ii, row in df_sample_sub.iterrows():
+    year, t1, t2 = get_year_t1_t2(row.ID)
+
+    team1 = df_tourney_final[(df_tourney_final.TeamID == t1) & (df_tourney_final.Season == year)].values
+    team2 = df_tourney_final[(df_tourney_final.TeamID == t2) & (df_tourney_final.Season == year)].values
+
+    model = team1 - team2
+
+    data.append(model)
+
+Predictions = pd.DataFrame(np.array(data).reshape(9112, 16), columns=(columns))
+
+Predictions.drop(labels=['Season', 'TeamID'], inplace=True, axis=1)
+
+Predictions.head()
 
 logger.debug('done')
 finish_time = time.time()
