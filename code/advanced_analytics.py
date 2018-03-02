@@ -5,7 +5,9 @@ import logging
 import os
 import time
 
+import matplotlib.pyplot as plt
 import pandas as pd
+import seaborn as sns
 
 start_time = time.time()
 
@@ -35,13 +37,7 @@ for input_file in input_files:
     else:
         logger.warning('input file %s is missing. Quitting.' % input_file)
 
-# df_tourney = pd.read_csv('../input/NCAATourneyCompactResults.csv')
 df_season = pd.read_csv('../input/RegularSeasonDetailedResults.csv')
-# df_teams = pd.read_csv('../input/Teams.csv')
-# df_conferences = pd.read_csv('../input/Conferences.csv')
-# df_rankings = pd.read_csv('../input/MasseyOrdinals.csv')
-# df_sample_sub = pd.read_csv('../input/SampleSubmissionStage1.csv')
-# df_seeds = pd.read_csv('../input/NCAATourneySeeds.csv')
 
 logger.debug('season data has shape %d x %d' % df_season.shape)
 # Calculate Winning/losing Team Possession Feature
@@ -259,8 +255,29 @@ logger.debug('season composite head: %s' % df_season_composite.head(default_head
 
 logger.debug('done building season composite data frame')
 
+corrmatrix = df_season_composite.iloc[:, 2:].corr()
+
+f, ax = plt.subplots(figsize=(11, 7))
+sns.heatmap(corrmatrix, vmax=.8, cbar=True, annot=True, square=True)
+heatmap_file = '../output/correlation_heatmap.png'
+plt.xticks(rotation=90)
+plt.yticks(rotation=0)
+plt.savefig(heatmap_file)
+
+df_rankings = pd.read_csv('../input/MasseyOrdinals.csv')
+df_RPI = df_rankings[df_rankings['SystemName'] == 'RPI']
+df_RPI_final = df_RPI[df_RPI['RankingDayNum'] == 133]
+df_RPI_final.drop(labels=['RankingDayNum', 'SystemName'], inplace=True, axis=1)
+logger.debug('RPI head: %s ' % df_RPI_final.head(default_head))
+
 logger.debug('done')
 finish_time = time.time()
 elapsed_hours, elapsed_remainder = divmod(finish_time - start_time, 3600)
 elapsed_minutes, elapsed_seconds = divmod(elapsed_remainder, 60)
 logger.info("Time: {:0>2}:{:0>2}:{:05.2f}".format(int(elapsed_hours), int(elapsed_minutes), elapsed_seconds))
+
+# df_tourney = pd.read_csv('../input/NCAATourneyCompactResults.csv')
+# df_teams = pd.read_csv('../input/Teams.csv')
+# df_conferences = pd.read_csv('../input/Conferences.csv')
+# df_sample_sub = pd.read_csv('../input/SampleSubmissionStage1.csv')
+# df_seeds = pd.read_csv('../input/NCAATourneySeeds.csv')
