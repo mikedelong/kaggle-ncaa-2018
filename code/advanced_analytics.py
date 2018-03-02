@@ -10,12 +10,19 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score
 from sklearn.model_selection import GridSearchCV
 from sklearn.utils import shuffle
 
 pd.set_option('display.max_columns', 999)
 
 start_time = time.time()
+
+
+# Return a tuple with ints `year`, `team1` and `team2`.
+def get_year_t1_t2(arg_id):
+    result = (int(item) for item in arg_id.split('_'))
+    return result
 
 formatter = logging.Formatter('%(asctime)s : %(name)s :: %(levelname)s : %(message)s')
 logger = logging.getLogger('main')
@@ -271,6 +278,7 @@ corrmatrix = df_season_composite.iloc[:, 2:].corr()
 figure, axes = plt.subplots(figsize=(11, 7))
 sns.heatmap(corrmatrix, vmax=.8, cbar=True, annot=True, square=True)
 heatmap_file = '../output/correlation_heatmap.png'
+logger.debug('writing correlation matrix to %s' % heatmap_file)
 plt.xticks(rotation=90)
 plt.yticks(rotation=0)
 plt.savefig(heatmap_file)
@@ -324,8 +332,9 @@ logger.debug(df_tourney.head(default_head))
 df_tourney['SeedDiff'] = df_tourney['WSeed'] - df_tourney['LSeed']
 figure, axes = plt.subplots(figsize=(11, 7))
 sns.countplot(df_tourney['SeedDiff'])
-countplot_filename = '../output/countplot.png'
-plt.savefig(countplot_filename)
+countplot_file = '../output/countplot.png'
+logger.debug('writing seed-difference count plot to %s' % countplot_file)
+plt.savefig(countplot_file)
 del figure
 del axes
 
@@ -351,21 +360,57 @@ X_train, y_train = shuffle(X_train, y_train)
 
 logreg = LogisticRegression(random_state=0)
 params = {'C': np.logspace(start=-5, stop=3, num=9)}
-clf = GridSearchCV(logreg, params, scoring='neg_log_loss', refit=True, cv=10, )
+clf = GridSearchCV(logreg, params, scoring='neg_log_loss', refit=True, cv=10)
 clf.fit(X_train, y_train)
 logger.debug('Best log_loss: %.4f, with best C: %.3f' % (clf.best_score_, clf.best_params_['C']))
 
 X = np.arange(-15, 15).reshape(-1, 1)  # this creates the range of seed differentials
-preds = clf.predict_proba(X)[:, 1]  # the 1 signifies winning
+logreg_preds = clf.predict_proba(X)[:, 1]  # the 1 signifies winning
 
 figure, axes = plt.subplots(figsize=(11, 7))
-plt.plot(X, preds)
+plt.plot(X, logreg_preds)
 plt.xlabel('Team1 seed - Team2 seed')
 plt.ylabel('P(Team1 will win)')
 seed_seed_graph_file = '../output/seed_seed_graph.png'
 plt.savefig(seed_seed_graph_file)
 del figure
 del axes
+
+train_acc = accuracy_score(y_true=y_train, y_pred=clf.predict(X_train))
+logger.debug('Training Accuracy: %.2f%%' % (100 * train_acc))
+
+df_sample_sub = pd.read_csv('../input/SampleSubmissionStage1.csv')
+logger.debug('sample sub data frame is %d x %d' % df_sample_sub.shape)
+logger.debug('sample sub head : %s' % df_sample_sub.head(default_head))
+
+# This generates a submission file for 2014-2017 using the simple Seeds model
+n_test_games = len(df_sample_sub)
+logger.debug('%d %d %d %d' %
+             (df_sample_sub.size, df_sample_sub.shape[0], df_sample_sub.shape[1], len(df_sample_sub)))
+logger.debug('n test games : %d' % n_test_games)
+X_test = np.zeros(shape=(n_test_games, 1))
+logger.debug('X test shape is %d x %d' % X_test.shape)
+
+for ii, row in df_sample_sub.iterrows():
+    year, t1, t2 = get_year_t1_t2(row.ID)
+    team1 = df_tourney_final[(df_tourney_final.TeamID == t1) & (df_tourney_final.Season == year)].Seed.values[0]
+    team2 = df_tourney_final[(df_tourney_final.TeamID == t2) & (df_tourney_final.Season == year)].Seed.values[0]
+    diff_seed = team1 - team2
+    X_test[ii, 0] = diff_seed
+
+preds = clf.predict_proba(X_test)[:, 1]
+
+logger.debug('df sample sub shape: %d x %d' % df_sample_sub.shape)
+logger.debug('X_test shape: %d x %d' % X_test.shape)
+logger.debug('preds length: %d' % len(preds))
+df_sample_sub['Pred'] = preds
+logger.debug('sample sub shape: %d x %d' % df_sample_sub.shape)
+logreg_file = '../output/logreg_seed_starter.csv'
+logger.debug('writing sample sub to %s' % logreg_file)
+df_sample_sub.to_csv(logreg_file, index=False)
+logger.debug('sample sub head: %s' % df_sample_sub.head(default_head))
+
+logger.debug('tourney final head: %s' % df_tourney_final.head(default_head))
 
 logger.debug('done')
 finish_time = time.time()
@@ -375,4 +420,3 @@ logger.info("Time: {:0>2}:{:0>2}:{:05.2f}".format(int(elapsed_hours), int(elapse
 
 # df_teams = pd.read_csv('../input/Teams.csv')
 # df_conferences = pd.read_csv('../input/Conferences.csv')
-# df_sample_sub = pd.read_csv('../input/SampleSubmissionStage1.csv')
