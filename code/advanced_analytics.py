@@ -58,10 +58,15 @@ logger.debug(df_season['Possessions'].head(default_head))
 # Formula (PTS + FGM + FTM - FGA - FTA + DREB + (.5 * OREB) + AST + STL + (.5 * BLK) - PF - TO)
 # / (GmPTS + GmFGM + GmFTM - GmFGA - GmFTA + GmDREB + (.5 * GmOREB) + GmAST + GmSTL + (.5 * GmBLK) - GmPF - GmTO)
 
-wtmp = df_season.apply(lambda row: row.WScore + row.WFGM + row.WFTM - row.WFGA - row.WFTA + row.WDR +
-                                   0.5 * row.WOR + row.WAst + row.WStl + 0.5 * row.WBlk - row.WPF - row.WTO, axis=1)
-ltmp = df_season.apply(lambda row: row.LScore + row.LFGM + row.LFTM - row.LFGA - row.LFTA + row.LDR +
-                                   0.5 * row.LOR + row.LAst + row.LStl + 0.5 * row.LBlk - row.LPF - row.LTO, axis=1)
+wtmp = df_season.apply(lambda row:
+                       row.WScore + row.WFGM + row.WFTM - row.WFGA - row.WFTA + row.WDR + 0.5 * row.WOR +
+                       row.WAst + row.WStl + 0.5 * row.WBlk - row.WPF - row.WTO,
+                       axis=1)
+ltmp = df_season.apply(lambda
+                           row:
+                       row.LScore + row.LFGM + row.LFTM - row.LFGA - row.LFTA + row.LDR + 0.5 * row.LOR +
+                       row.LAst + row.LStl + 0.5 * row.LBlk - row.LPF - row.LTO,
+                       axis=1)
 
 df_season['WPIE'] = wtmp / (wtmp + ltmp)
 df_season['LPIE'] = ltmp / (wtmp + ltmp)
@@ -101,10 +106,10 @@ df_season['LFTAR'] = df_season.apply(lambda row: row.LFTA / row.LFGA, axis=1)
 # 3. Rebounding (20%)
 # 4. Free Throws (15%)
 
-df_season['W4Factor'] = df_season.apply(lambda row: 0.40 * row.WeFGP + 0.25 * row.WTOR + 0.20 * row.WORP +
-                                                    0.15 * row.WFTAR, axis=1)
-df_season['L4Factor'] = df_season.apply(lambda row: 0.40 * row.LeFGP + 0.25 * row.LTOR + 0.20 * row.LORP +
-                                                    0.15 * row.LFTAR, axis=1)
+df_season['W4Factor'] = df_season.apply(
+    lambda row: 0.40 * row.WeFGP + 0.25 * row.WTOR + 0.20 * row.WORP + 0.15 * row.WFTAR, axis=1)
+df_season['L4Factor'] = df_season.apply(
+    lambda row: 0.40 * row.LeFGP + 0.25 * row.LTOR + 0.20 * row.LORP + 0.15 * row.LFTAR, axis=1)
 
 # Offensive efficiency (OffRtg) =  (Points / Possessions)
 # Every possession counts
@@ -257,18 +262,66 @@ logger.debug('done building season composite data frame')
 
 corrmatrix = df_season_composite.iloc[:, 2:].corr()
 
-f, ax = plt.subplots(figsize=(11, 7))
+figure, axes = plt.subplots(figsize=(11, 7))
 sns.heatmap(corrmatrix, vmax=.8, cbar=True, annot=True, square=True)
 heatmap_file = '../output/correlation_heatmap.png'
 plt.xticks(rotation=90)
 plt.yticks(rotation=0)
 plt.savefig(heatmap_file)
+del figure
+del axes
 
 df_rankings = pd.read_csv('../input/MasseyOrdinals.csv')
+logger.debug('rankings data frame size: %d x %d' % df_rankings.shape)
+
 df_RPI = df_rankings[df_rankings['SystemName'] == 'RPI']
 df_RPI_final = df_RPI[df_RPI['RankingDayNum'] == 133]
 df_RPI_final.drop(labels=['RankingDayNum', 'SystemName'], inplace=True, axis=1)
 logger.debug('RPI head: %s ' % df_RPI_final.head(default_head))
+
+df_seeds = pd.read_csv('../input/NCAATourneySeeds.csv')
+logger.debug('seeds data frame size: %d x %d' % df_seeds.shape)
+
+logger.debug(df_seeds.head(default_head))
+# Convert string to an integer
+
+df_seeds['seed_int'] = df_seeds['Seed'].apply(lambda x: int(x[1:3]))
+df_seeds.drop(labels=['Seed'], inplace=True, axis=1)
+df_seeds.rename(columns={'seed_int': 'Seed'}, inplace=True)
+df_seeds.head(default_head)
+
+# Create dataframe of team features for all seasons
+
+# ranks only start since 2003
+
+df_seeds_final = df_seeds[df_seeds['Season'] > 2002]
+
+# 2 step merge
+
+tourney_merge_columns = ['Season', 'TeamID']
+df_tourney_stage = pd.merge(left=df_seeds_final, right=df_RPI_final, how='left', on=tourney_merge_columns)
+df_tourney_final = pd.merge(left=df_tourney_stage, right=df_season_composite, how='left', on=tourney_merge_columns)
+logger.debug(df_tourney_final.head(default_head))
+
+df_tourney = pd.read_csv('../input/NCAATourneyCompactResults.csv')
+logger.debug('tournament data frame shape: %d x %d' % df_tourney.shape)
+
+df_tourney.drop(labels=['DayNum', 'WScore', 'LScore', 'WLoc', 'NumOT'], inplace=True, axis=1)
+df_tourney = pd.merge(left=df_tourney, right=df_seeds, how='left', left_on=['Season', 'WTeamID'],
+                      right_on=tourney_merge_columns)
+df_tourney = pd.merge(left=df_tourney, right=df_seeds, how='left', left_on=['Season', 'LTeamID'],
+                      right_on=tourney_merge_columns)
+df_tourney.drop(labels=['TeamID_x', 'TeamID_y'], inplace=True, axis=1)
+df_tourney.rename(columns={'Seed_x': 'WSeed', 'Seed_y': 'LSeed'}, inplace=True)
+logger.debug(df_tourney.head(default_head))
+
+df_tourney['SeedDiff'] = df_tourney['WSeed'] - df_tourney['LSeed']
+figure, axes = plt.subplots(figsize=(11, 7))
+sns.countplot(df_tourney['SeedDiff'])
+countplot_filename = '../output/countplot.png'
+plt.savefig(countplot_filename)
+del figure
+del axes
 
 logger.debug('done')
 finish_time = time.time()
@@ -276,8 +329,6 @@ elapsed_hours, elapsed_remainder = divmod(finish_time - start_time, 3600)
 elapsed_minutes, elapsed_seconds = divmod(elapsed_remainder, 60)
 logger.info("Time: {:0>2}:{:0>2}:{:05.2f}".format(int(elapsed_hours), int(elapsed_minutes), elapsed_seconds))
 
-# df_tourney = pd.read_csv('../input/NCAATourneyCompactResults.csv')
 # df_teams = pd.read_csv('../input/Teams.csv')
 # df_conferences = pd.read_csv('../input/Conferences.csv')
 # df_sample_sub = pd.read_csv('../input/SampleSubmissionStage1.csv')
-# df_seeds = pd.read_csv('../input/NCAATourneySeeds.csv')
