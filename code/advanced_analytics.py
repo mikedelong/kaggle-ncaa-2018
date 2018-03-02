@@ -6,8 +6,14 @@ import os
 import time
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GridSearchCV
+from sklearn.utils import shuffle
+
+pd.set_option('display.max_columns', 999)
 
 start_time = time.time()
 
@@ -320,6 +326,44 @@ figure, axes = plt.subplots(figsize=(11, 7))
 sns.countplot(df_tourney['SeedDiff'])
 countplot_filename = '../output/countplot.png'
 plt.savefig(countplot_filename)
+del figure
+del axes
+
+df_wins = pd.DataFrame()
+df_wins['SeedDiff'] = df_tourney['SeedDiff']
+df_wins['Result'] = 1
+
+df_losses = pd.DataFrame()
+df_losses['SeedDiff'] = -df_tourney['SeedDiff']
+df_losses['Result'] = 0
+
+df_predictions = pd.concat([df_wins, df_losses])
+logger.debug('predictions shape is %d x %d' % df_predictions.shape)
+logger.debug('predictions: %s' % df_predictions.head(default_head))
+
+# setup the data
+
+X_train = df_predictions.SeedDiff.values.reshape(-1, 1)
+y_train = df_predictions.Result.values
+X_train, y_train = shuffle(X_train, y_train)
+
+# use Logistic regression with Gridsearch for parameter tuning
+
+logreg = LogisticRegression(random_state=0)
+params = {'C': np.logspace(start=-5, stop=3, num=9)}
+clf = GridSearchCV(logreg, params, scoring='neg_log_loss', refit=True, cv=10, )
+clf.fit(X_train, y_train)
+logger.debug('Best log_loss: %.4f, with best C: %.3f' % (clf.best_score_, clf.best_params_['C']))
+
+X = np.arange(-15, 15).reshape(-1, 1)  # this creates the range of seed differentials
+preds = clf.predict_proba(X)[:, 1]  # the 1 signifies winning
+
+figure, axes = plt.subplots(figsize=(11, 7))
+plt.plot(X, preds)
+plt.xlabel('Team1 seed - Team2 seed')
+plt.ylabel('P(Team1 will win)')
+seed_seed_graph_file = '../output/seed_seed_graph.png'
+plt.savefig(seed_seed_graph_file)
 del figure
 del axes
 
