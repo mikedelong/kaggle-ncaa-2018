@@ -604,24 +604,19 @@ logger.debug('X (head) : %s' % X.head(default_head))
 n_test_games = len(df_sample_sub)
 X_test = np.zeros(shape=(n_test_games, 1))
 columns = df_tourney_final.columns.get_values()
-model = []
+# model = []
 data = []
 
 for ii, row in df_sample_sub.iterrows():
     year, t1, t2 = get_year_t1_t2(row.ID)
-
     team1 = df_tourney_final[(df_tourney_final.TeamID == t1) & (df_tourney_final.Season == year)].values
     team2 = df_tourney_final[(df_tourney_final.TeamID == t2) & (df_tourney_final.Season == year)].values
-
-    model = team1 - team2
-
-    data.append(model)
+    # model =
+    data.append(team1 - team2)
 
 Predictions = pd.DataFrame(np.array(data).reshape(9112, 16), columns=(columns))
-
 Predictions.drop(labels=['Season', 'TeamID'], inplace=True, axis=1)
-
-Predictions.head()
+logger.debug('predictions (head): %s', Predictions.head(default_head))
 
 logger.debug('done')
 finish_time = time.time()
