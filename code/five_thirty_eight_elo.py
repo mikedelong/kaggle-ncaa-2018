@@ -83,7 +83,7 @@ for i in range(size):
 
     # Get key data from current row
     w = rs.at[i, 'WTeamID']
-    l = rs.at[i, 'LTeamID']
+    lx = rs.at[i, 'LTeamID']
     margin = rs.at[i, 'margin']
     wloc = rs.at[i, 'WLoc']
 
@@ -95,14 +95,14 @@ for i in range(size):
         l_ad += HOME_ADVANTAGE
 
     # Get elo updates as a result of the game
-    prediction, update = elo_update(elo_dict[w] + w_ad, elo_dict[l] + l_ad, margin, K)
+    prediction, update = elo_update(elo_dict[w] + w_ad, elo_dict[lx] + l_ad, margin, K)
     elo_dict[w] += update
-    elo_dict[l] -= update
+    elo_dict[lx] -= update
     predictions.append(prediction)
 
     # Stores new elos in the games dataframe
     rs.loc[i, 'w_elo'] = elo_dict[w]
-    rs.loc[i, 'l_elo'] = elo_dict[l]
+    rs.loc[i, 'l_elo'] = elo_dict[lx]
     if i % 1000 == 0:
         logger.debug('we have finished prediction %d of %d: (%.1f%%)' % (i, size, 100.0 * float(i) / float(size)))
 logger.debug('done populating predictions.')
