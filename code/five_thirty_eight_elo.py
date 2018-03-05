@@ -54,6 +54,7 @@ def final_elo_per_season(arg_df, arg_team_id):
     return result
 
 
+# todo add check for intput folder
 input_file = '../input/RegularSeasonCompactResults.csv'
 logger.debug('loading data from %s' % input_file)
 rs = pd.read_csv(input_file)
@@ -79,6 +80,7 @@ predictions = []
 
 # Loop over all rows of the games dataframe
 size = rs.shape[0]
+increment = size / 1502
 for i in range(size):
 
     # Get key data from current row
@@ -103,7 +105,7 @@ for i in range(size):
     # Stores new elos in the games dataframe
     rs.loc[i, 'w_elo'] = elo_dict[w]
     rs.loc[i, 'l_elo'] = elo_dict[lx]
-    if i % 1000 == 0:
+    if i % increment == 0:
         logger.debug('we have finished prediction %d of %d: (%.1f%%)' % (i, size, 100.0 * float(i) / float(size)))
 logger.debug('done populating predictions.')
 
@@ -116,7 +118,8 @@ season_elos = pd.concat(df_list)
 
 logger.debug(season_elos.sample(default_head))
 
-output_file = './output/season_elos.csv'
+# todo add check for output folder early
+output_file = '../output/season_elos.csv'
 
 season_elos.to_csv(output_file, index=None)
 
