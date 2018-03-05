@@ -80,7 +80,7 @@ predictions = []
 
 # Loop over all rows of the games dataframe
 size = rs.shape[0]
-increment = size / 1502
+increment = size // 150
 for i in range(size):
 
     # Get key data from current row
@@ -105,7 +105,7 @@ for i in range(size):
     # Stores new elos in the games dataframe
     rs.loc[i, 'w_elo'] = elo_dict[w]
     rs.loc[i, 'l_elo'] = elo_dict[lx]
-    if i % increment == 0:
+    if i % increment == increment / 2:
         logger.debug('we have finished prediction %d of %d: (%.1f%%)' % (i, size, 100.0 * float(i) / float(size)))
 logger.debug('done populating predictions.')
 
