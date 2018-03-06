@@ -2,6 +2,7 @@
 # https://www.kaggle.com/lpkirwin/fivethirtyeight-elo-ratings
 
 import logging
+import os
 import time
 
 import numpy as np
@@ -18,7 +19,18 @@ logger.addHandler(console_handler)
 console_handler.setLevel(logging.DEBUG)
 logger.debug('started')
 
-default_head = 10
+# check up front if the input and output folders exist
+input_folder = '../input/'
+output_folder = '../output/'
+
+for folder in [input_folder, output_folder]:
+    if not os.path.isdir(folder):
+        logger.warning('%s does not exist; quitting.' % folder)
+        quit()
+    else:
+        logger.debug('required folder %s exists.' % folder)
+
+default_head = 0
 K = 21.0  # was 20.0
 HOME_ADVANTAGE = 100.0
 
@@ -54,10 +66,12 @@ def final_elo_per_season(arg_df, arg_team_id):
     return result
 
 
-# todo add check for intput folder
-input_file = '../input/RegularSeasonCompactResults.csv'
-logger.debug('loading data from %s' % input_file)
-rs = pd.read_csv(input_file)
+input_file = 'RegularSeasonCompactResults.csv'
+
+# todo make sure this exists
+full_input_file = input_folder + input_file
+logger.debug('loading data from %s' % full_input_file)
+rs = pd.read_csv(full_input_file)
 logger.debug(rs.head(default_head))
 
 team_ids = set(rs.WTeamID).union(set(rs.LTeamID))
@@ -118,10 +132,9 @@ season_elos = pd.concat(df_list)
 
 logger.debug(season_elos.sample(default_head))
 
-# todo add check for output folder early
-output_file = '../output/season_elos.csv'
-
-season_elos.to_csv(output_file, index=None)
+output_file = 'season_elos.csv'
+full_output_folder = output_folder + output_file
+season_elos.to_csv(full_output_folder, index=None)
 
 logger.debug('done')
 finish_time = time.time()
