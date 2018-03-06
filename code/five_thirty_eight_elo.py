@@ -19,21 +19,6 @@ logger.addHandler(console_handler)
 console_handler.setLevel(logging.DEBUG)
 logger.debug('started')
 
-# check up front if the input and output folders exist
-input_folder = '../input/'
-output_folder = '../output/'
-
-for folder in [input_folder, output_folder]:
-    if not os.path.isdir(folder):
-        logger.warning('%s does not exist; quitting.' % folder)
-        quit()
-    else:
-        logger.debug('required folder %s exists.' % folder)
-
-default_head = 0
-K = 21.0  # was 20.0
-HOME_ADVANTAGE = 100.0
-
 
 def elo_pred(arg_elo1, arg_elo2):
     result = (1.0 / (10.0 ** (-(arg_elo1 - arg_elo2) / 400.0) + 1.0))
@@ -46,9 +31,9 @@ def expected_margin(arg_elo_diff):
 
 
 def elo_update(aeg_w_elo, arg_l_elo, arg_margin, arg_k):
-    local_pred = elo_pred(aeg_w_elo, arg_l_elo)
+    local_prediction = elo_pred(aeg_w_elo, arg_l_elo)
     multiplier = ((arg_margin + 3.0) ** 0.8) / expected_margin(aeg_w_elo - arg_l_elo)
-    result = (local_pred, arg_k * multiplier * (1 - local_pred))
+    result = (local_prediction, arg_k * multiplier * (1.0 - local_prediction))
     return result
 
 
@@ -65,12 +50,31 @@ def final_elo_per_season(arg_df, arg_team_id):
     result = pd.DataFrame({'team_id': arg_team_id, 'season': d.Season, 'season_elo': d.season_elo})
     return result
 
+# check up front if the input and output folders exist
+input_folder = '../input/'
+output_folder = '../output/'
+
+for folder in [input_folder, output_folder]:
+    if not os.path.isdir(folder):
+        logger.warning('%s does not exist; quitting.' % folder)
+        quit()
+    else:
+        logger.debug('required folder %s exists.' % folder)
+
+default_head = 1
+K = 21.0  # was 20.0
+HOME_ADVANTAGE = 100.0
+
+
+
 
 input_file = 'RegularSeasonCompactResults.csv'
-
-# todo make sure this exists
 full_input_file = input_folder + input_file
-logger.debug('loading data from %s' % full_input_file)
+if not os.path.exists(full_input_file):
+    logger.debug('required input file %s does not exist. Quitting.' % full_input_file)
+else:
+    logger.debug('loading data from %s' % full_input_file)
+
 rs = pd.read_csv(full_input_file)
 logger.debug(rs.head(default_head))
 
