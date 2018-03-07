@@ -63,74 +63,78 @@ for folder in [input_folder, output_folder]:
         logger.debug('required folder %s exists.' % folder)
 
 default_head = 1
-HOME_ADVANTAGE = 100.0
+
+input_file = 'RegularSeasonCompactResults.csv'
+full_input_file = input_folder + input_file
+if not os.path.exists(full_input_file):
+    logger.debug('required input file %s does not exist. Quitting.' % full_input_file)
+else:
+    logger.debug('loading data from %s' % full_input_file)
+
+rs = pd.read_csv(full_input_file)
+rs_archive = rs.copy(deep=True)
+logger.debug(rs.head(default_head))
+
+team_ids = set(rs.WTeamID).union(set(rs.LTeamID))
+logger.debug('we have %d team IDs' % len(team_ids))
+
 k_fit_results = dict()
-for K in [19.0, 20.0, 21.0]:
+for K in [18.0, 19.0, 20.0]:
+    for HOME_ADVANTAGE in [90.0, 100.0, 110.0]:
+        rs = rs_archive.copy(deep=True)
 
-    input_file = 'RegularSeasonCompactResults.csv'
-    full_input_file = input_folder + input_file
-    if not os.path.exists(full_input_file):
-        logger.debug('required input file %s does not exist. Quitting.' % full_input_file)
-    else:
-        logger.debug('loading data from %s' % full_input_file)
+        # This dictionary will be used as a lookup for current
+        # scores while the algorithm is iterating through each game
+        elo_dict = dict(zip(list(team_ids), [1500] * len(team_ids)))
+        # New columns to help us iteratively update elos
+        rs['margin'] = rs.WScore - rs.LScore
+        rs['w_elo'] = None
+        rs['l_elo'] = None
 
-    rs = pd.read_csv(full_input_file)
-    logger.debug(rs.head(default_head))
+        # I'm going to iterate over the games dataframe using
+        # index numbers, so want to check that nothing is out
+        # of order before I do that.
+        assert np.all(rs.index.values == np.array(range(rs.shape[0]))), 'Index is out of order.'
 
-    team_ids = set(rs.WTeamID).union(set(rs.LTeamID))
-    logger.debug('we have %d team IDs' % len(team_ids))
+        predictions = []
 
-    # This dictionary will be used as a lookup for current
-    # scores while the algorithm is iterating through each game
-    elo_dict = dict(zip(list(team_ids), [1500] * len(team_ids)))
-    # New columns to help us iteratively update elos
-    rs['margin'] = rs.WScore - rs.LScore
-    rs['w_elo'] = None
-    rs['l_elo'] = None
+        # Loop over all rows of the games dataframe
+        size = rs.shape[0]
+        increment = size // 150
+        for i in range(size):
 
-    # I'm going to iterate over the games dataframe using
-    # index numbers, so want to check that nothing is out
-    # of order before I do that.
-    assert np.all(rs.index.values == np.array(range(rs.shape[0]))), 'Index is out of order.'
+            # Get key data from current row
+            w = rs.at[i, 'WTeamID']
+            lx = rs.at[i, 'LTeamID']
+            margin = rs.at[i, 'margin']
+            wloc = rs.at[i, 'WLoc']
 
-    predictions = []
+            # Does either team get a home-court advantage?
+            w_ad, l_ad, = 0.0, 0.0
+            if wloc == 'H':
+                w_ad += HOME_ADVANTAGE
+            elif wloc == 'A':
+                l_ad += HOME_ADVANTAGE
 
-    # Loop over all rows of the games dataframe
-    size = rs.shape[0]
-    increment = size // 150
-    for i in range(size):
+            # Get elo updates as a result of the game
+            prediction, update = elo_update(elo_dict[w] + w_ad, elo_dict[lx] + l_ad, margin, K)
+            elo_dict[w] += update
+            elo_dict[lx] -= update
+            predictions.append(prediction)
 
-        # Get key data from current row
-        w = rs.at[i, 'WTeamID']
-        lx = rs.at[i, 'LTeamID']
-        margin = rs.at[i, 'margin']
-        wloc = rs.at[i, 'WLoc']
+            # Stores new elos in the games dataframe
+            rs.loc[i, 'w_elo'] = elo_dict[w]
+            rs.loc[i, 'l_elo'] = elo_dict[lx]
+            if i % increment == increment / 2:
+                logger.debug(
+                    'we have finished prediction %d of %d: (%.1f%%)' % (i, size, 100.0 * float(i) / float(size)))
+        logger.debug('done populating predictions.')
 
-        # Does either team get a home-court advantage?
-        w_ad, l_ad, = 0.0, 0.0
-        if wloc == 'H':
-            w_ad += HOME_ADVANTAGE
-        elif wloc == 'A':
-            l_ad += HOME_ADVANTAGE
+        logger.debug(rs.tail(default_head))
 
-        # Get elo updates as a result of the game
-        prediction, update = elo_update(elo_dict[w] + w_ad, elo_dict[lx] + l_ad, margin, K)
-        elo_dict[w] += update
-        elo_dict[lx] -= update
-        predictions.append(prediction)
-
-        # Stores new elos in the games dataframe
-        rs.loc[i, 'w_elo'] = elo_dict[w]
-        rs.loc[i, 'l_elo'] = elo_dict[lx]
-        if i % increment == increment / 2:
-            logger.debug('we have finished prediction %d of %d: (%.1f%%)' % (i, size, 100.0 * float(i) / float(size)))
-    logger.debug('done populating predictions.')
-
-    logger.debug(rs.tail(default_head))
-
-    fit = np.mean(-np.log(predictions))
-    k_fit_results[K] = fit
-    logger.debug('K: %.1f fit: %.4f' % (K, fit))
+        fit = np.mean(-np.log(predictions))
+        k_fit_results[(K, HOME_ADVANTAGE)] = fit
+        logger.debug('K: %.1f HOME_ADVANTAGE: %.1f fit: %.4f' % (K, HOME_ADVANTAGE, fit))
 
     df_list = [final_elo_per_season(rs, i) for i in team_ids]
     season_elos = pd.concat(df_list)
